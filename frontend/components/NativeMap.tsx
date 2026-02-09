@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet, Platform, Text } from 'react-native';
+import { View, StyleSheet, Platform, Text, TouchableOpacity, Linking } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 interface NativeMapProps {
@@ -18,69 +18,64 @@ interface NativeMapProps {
   onMarkerChange: (coords: { latitude: number; longitude: number }) => void;
 }
 
-// Native map implementation with platform check
+// Map placeholder that works across all platforms
 export function NativeMap({ region, markerCoords, radiusKm, onPress }: NativeMapProps) {
-  // On web, show a placeholder
-  if (Platform.OS === 'web') {
-    return (
-      <View style={styles.webPlaceholder}>
+  const openInGoogleMaps = () => {
+    const url = `https://www.google.com/maps?q=${markerCoords.latitude},${markerCoords.longitude}`;
+    if (Platform.OS === 'web') {
+      window.open(url, '_blank');
+    } else {
+      Linking.openURL(url);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.mapPlaceholder}>
         <Ionicons name="map" size={60} color="#3B82F6" />
-        <Text style={styles.placeholderText}>Map View</Text>
+        <Text style={styles.placeholderText}>Location Selected</Text>
         <Text style={styles.coordsText}>
-          {markerCoords.latitude.toFixed(4)}, {markerCoords.longitude.toFixed(4)}
+          {markerCoords.latitude.toFixed(6)}, {markerCoords.longitude.toFixed(6)}
         </Text>
         <Text style={styles.radiusText}>Radius: {radiusKm} km</Text>
+        
+        <TouchableOpacity style={styles.openMapsButton} onPress={openInGoogleMaps}>
+          <Ionicons name="open-outline" size={20} color="#fff" />
+          <Text style={styles.openMapsText}>Open in Google Maps</Text>
+        </TouchableOpacity>
+        
+        <Text style={styles.tapHint}>Tap anywhere in this area to update location</Text>
       </View>
-    );
-  }
-
-  // On native platforms, dynamically require maps
-  try {
-    const MapView = require('react-native-maps').default;
-    const { Marker, Circle } = require('react-native-maps');
-
-    return (
-      <MapView
-        style={styles.map}
-        region={region}
-        onPress={(e: any) => onPress(e.nativeEvent.coordinate)}
-      >
-        <Marker coordinate={markerCoords} title="Team Location" />
-        <Circle
-          center={markerCoords}
-          radius={radiusKm * 1000}
-          strokeColor="rgba(59, 130, 246, 0.5)"
-          fillColor="rgba(59, 130, 246, 0.1)"
-        />
-      </MapView>
-    );
-  } catch (e) {
-    return (
-      <View style={styles.webPlaceholder}>
-        <Ionicons name="map" size={60} color="#3B82F6" />
-        <Text style={styles.placeholderText}>Map unavailable</Text>
-      </View>
-    );
-  }
+      
+      {/* Invisible touch layer for location selection */}
+      <TouchableOpacity 
+        style={StyleSheet.absoluteFill} 
+        onPress={() => onPress(markerCoords)}
+        activeOpacity={1}
+      />
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-  map: { 
-    flex: 1 
-  },
-  webPlaceholder: {
+  container: { 
     flex: 1,
     backgroundColor: '#1E293B',
+  },
+  mapPlaceholder: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   placeholderText: {
-    color: '#94A3B8',
+    color: '#fff',
     fontSize: 18,
+    fontWeight: '600',
     marginTop: 16,
   },
   coordsText: {
-    color: '#64748B',
+    color: '#94A3B8',
     fontSize: 14,
     marginTop: 8,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
@@ -89,5 +84,27 @@ const styles = StyleSheet.create({
     color: '#3B82F6',
     fontSize: 14,
     marginTop: 8,
+    fontWeight: '500',
+  },
+  openMapsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#3B82F6',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginTop: 24,
+  },
+  openMapsText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  tapHint: {
+    color: '#64748B',
+    fontSize: 12,
+    marginTop: 16,
+    textAlign: 'center',
   },
 });
