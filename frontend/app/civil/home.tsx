@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
@@ -10,7 +9,7 @@ import Constants from 'expo-constants';
 import { getPendingCount, processQueue } from '../../utils/offlineQueue';
 import { getAuthToken, clearAuthData, getUserMetadata } from '../../utils/auth';
 
-const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://guardlogin.preview.emergentagent.com';
+const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL;
 
 export default function CivilHome() {
   const router = useRouter();
@@ -22,9 +21,9 @@ export default function CivilHome() {
   const [loading, setLoading] = useState(true);
   const [hasActivePanic, setHasActivePanic] = useState(false);
 
-  // Refresh on every screen focus
+  // Refresh on every screen focus using expo-router's useFocusEffect
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       initializeScreen();
     }, [])
   );
