@@ -354,6 +354,7 @@ async def get_profile(user = Depends(get_current_user)):
     return {
         'id': str(user['_id']),
         'email': user['email'],
+        'full_name': user.get('full_name', ''),
         'phone': user.get('phone'),
         'role': user.get('role', 'civil'),
         'is_premium': user.get('is_premium', False),
