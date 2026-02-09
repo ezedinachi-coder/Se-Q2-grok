@@ -18,6 +18,7 @@ export default function SecurityHome() {
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [agentName, setAgentName] = useState('Agent');
 
   useEffect(() => {
     initializeScreen();
