@@ -1589,9 +1589,13 @@ async def get_conversations(user: dict = Depends(get_current_user)):
     return {'conversations': result}
 
 @api_router.post("/chat/start")
-async def start_conversation(to_user_id: str = Body(..., embed=True), user: dict = Depends(get_current_user)):
+async def start_conversation(data: dict = Body(...), user: dict = Depends(get_current_user)):
     """Start a new conversation or get existing one"""
     user_id = str(user['_id'])
+    to_user_id = data.get('other_user_id') or data.get('to_user_id')
+    
+    if not to_user_id:
+        raise HTTPException(status_code=400, detail="other_user_id is required")
     
     # Check if conversation already exists
     existing = await db.conversations.find_one({
