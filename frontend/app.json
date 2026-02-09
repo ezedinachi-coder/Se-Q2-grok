@@ -101,6 +101,7 @@
       "eas": {
         "projectId": "4ccdc80f-f0c9-4ba9-b2d2-3a333cf3dadd"
       },
+      "backendUrl": "https://ongoing-dev-22.preview.emergentagent.com",
       "router": {
         "origin": false
       }
