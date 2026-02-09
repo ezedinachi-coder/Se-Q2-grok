@@ -1731,20 +1731,6 @@ async def get_unread_count(user: dict = Depends(get_current_user)):
     
     return {'unread_count': total}
 
-# Include router
-app.include_router(api_router)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 # ===== DATA RESET AND SEED ENDPOINT =====
 @api_router.post("/admin/reset-and-seed")
 async def reset_and_seed_data():
@@ -1758,6 +1744,103 @@ async def reset_and_seed_data():
         await db.conversations.delete_many({})
         await db.messages.delete_many({})
         await db.users.delete_many({})
+        
+        # Create specified Civil users
+        civil_users = [
+            {"email": "ezedinachianthony@gmail.com", "password": "SafeGuard2025!", "full_name": "Anthony Ezedinachi", "phone": "+2349150810387"},
+            {"email": "okpalaezeukwu@gmail.com", "password": "SafeGuard2025!", "full_name": "Chukwuma Okpalaezeukwu", "phone": "+234810866212"},
+            {"email": "inspirohm@gmail.com", "password": "SafeGuard2025!", "full_name": "Romeo Ohanaekwu", "phone": "+2348023296883"},
+        ]
+        
+        for user in civil_users:
+            await db.users.insert_one({
+                "email": user["email"],
+                "password": hash_password(user["password"]),
+                "full_name": user["full_name"],
+                "phone": user["phone"],
+                "role": "civil",
+                "is_premium": False,
+                "is_active": True,
+                "created_at": datetime.utcnow()
+            })
+            logger.info(f"Created civil user: {user['email']}")
+        
+        # Create specified Security users
+        security_users = [
+            {"email": "stalexmurphy@udogachi.com", "password": "SecurePass2025!", "full_name": "Stanley Ezeh", "phone": "+2347065822677"},
+            {"email": "ogabiya@udogachi.com", "password": "SecurePass2025!", "full_name": "Paul Biya", "phone": "+234803847211"},
+        ]
+        
+        for user in security_users:
+            await db.users.insert_one({
+                "email": user["email"],
+                "password": hash_password(user["password"]),
+                "full_name": user["full_name"],
+                "phone": user["phone"],
+                "role": "security",
+                "is_active": True,
+                "created_at": datetime.utcnow()
+            })
+            logger.info(f"Created security user: {user['email']}")
+        
+        # Create specified Admin users
+        admin_users = [
+            {"email": "anthonyezedinachi@gmail.com", "password": "Admin123!", "full_name": "Anthony Ezedinachi", "phone": "+2347065852678"},
+            {"email": "benchiobi@gmail.com", "password": "Admin123!", "full_name": "Ben Chiobi", "phone": "+2348033147184"},
+        ]
+        
+        for user in admin_users:
+            await db.users.insert_one({
+                "email": user["email"],
+                "password": hash_password(user["password"]),
+                "full_name": user["full_name"],
+                "phone": user["phone"],
+                "role": "admin",
+                "is_active": True,
+                "created_at": datetime.utcnow()
+            })
+            logger.info(f"Created admin user: {user['email']}")
+        
+        # Recreate invite codes
+        await db.invite_codes.delete_many({})
+        default_codes = [
+            {"code": "SECURITY2025", "max_uses": 100, "used_count": 0},
+            {"code": "SAFEGUARD-TEAM", "max_uses": 50, "used_count": 0},
+        ]
+        for code_data in default_codes:
+            await db.invite_codes.insert_one({
+                **code_data,
+                "created_at": datetime.utcnow(),
+                "expires_at": datetime.utcnow() + timedelta(days=365),
+                "is_active": True
+            })
+        
+        return {
+            "status": "success",
+            "message": "Data reset and seeded successfully",
+            "accounts_created": {
+                "civil": 3,
+                "security": 2,
+                "admin": 2
+            }
+        }
+    except Exception as e:
+        logger.error(f"Reset error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Include router
+app.include_router(api_router)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
         
         # Create specified Civil users
         civil_users = [
