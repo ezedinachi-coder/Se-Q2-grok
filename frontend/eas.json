@@ -7,8 +7,11 @@
     "preview": {
       "distribution": "internal",
       "android": {
-        "buildType": "apk"
-      }
+        "buildType": "apk",
+        "credentialsSource": "remote"
+      },
+      "credentialsSource": "remote",
+      "withoutCredentials": true
     }
   }
 }
