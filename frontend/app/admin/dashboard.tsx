@@ -195,8 +195,20 @@ export default function AdminDashboard() {
             <Ionicons name="videocam" size={28} color="#F59E0B" />
             <Text style={styles.actionText}>View Reports</Text>
           </TouchableOpacity>
+          <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/admin/search')}>
+            <Ionicons name="search" size={28} color="#8B5CF6" />
+            <Text style={styles.actionText}>Search & Export</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/admin/track-user')}>
+            <Ionicons name="locate" size={28} color="#EC4899" />
+            <Text style={styles.actionText}>Track Users</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/admin/messaging')}>
+            <Ionicons name="chatbubbles" size={28} color="#14B8A6" />
+            <Text style={styles.actionText}>Messaging</Text>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/admin/invite-codes')}>
-            <Ionicons name="key" size={28} color="#8B5CF6" />
+            <Ionicons name="key" size={28} color="#6366F1" />
             <Text style={styles.actionText}>Invite Codes</Text>
           </TouchableOpacity>
         </View>
