@@ -7,6 +7,7 @@ import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import Constants from 'expo-constants';
 import { getAuthToken, clearAuthData } from '../../utils/auth';
+import { LocationMapModal } from '../../components/LocationMapModal';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://guardlogin.preview.emergentagent.com';
 
@@ -25,6 +26,7 @@ export default function SecurityPanics() {
   const router = useRouter();
   const [panics, setPanics] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [locationModal, setLocationModal] = useState<{ visible: boolean; lat: number; lng: number; title: string; subtitle?: string } | null>(null);
 
   // Refresh on focus
   useFocusEffect(
