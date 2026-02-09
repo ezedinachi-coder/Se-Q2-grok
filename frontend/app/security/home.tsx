@@ -167,9 +167,22 @@ export default function SecurityHome() {
   };
 
   const handleLogout = async () => {
-    console.log('[SecurityHome] Logout initiated');
-    await clearAuthData();
-    router.replace('/auth/login');
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Logout',
+          style: 'destructive',
+          onPress: async () => {
+            console.log('[SecurityHome] Logout confirmed');
+            await clearAuthData();
+            router.replace('/auth/login');
+          }
+        }
+      ]
+    );
   };
 
   if (loading) {
