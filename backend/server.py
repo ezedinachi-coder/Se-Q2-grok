@@ -1833,6 +1833,276 @@ async def reset_and_seed_data():
         logger.error(f"Reset error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ===== ADMIN SEARCH ENDPOINT =====
+@api_router.get("/admin/search")
+async def admin_search(
+    query: str = "",
+    data_type: str = "all",
+    field: str = "all",
+    start_date: str = None,
+    end_date: str = None,
+    user: dict = Depends(get_current_user)
+):
+    """Search all data - Admin only"""
+    if user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    results = []
+    
+    # Build search filter
+    search_filter = {}
+    if query:
+        if field == 'name':
+            search_filter['full_name'] = {'$regex': query, '$options': 'i'}
+        elif field == 'email':
+            search_filter['email'] = {'$regex': query, '$options': 'i'}
+        elif field == 'phone':
+            search_filter['phone'] = {'$regex': query, '$options': 'i'}
+        else:
+            search_filter['$or'] = [
+                {'full_name': {'$regex': query, '$options': 'i'}},
+                {'email': {'$regex': query, '$options': 'i'}},
+                {'phone': {'$regex': query, '$options': 'i'}},
+                {'caption': {'$regex': query, '$options': 'i'}}
+            ]
+    
+    # Date filter
+    date_filter = {}
+    if start_date:
+        try:
+            date_filter['$gte'] = datetime.fromisoformat(start_date)
+        except: pass
+    if end_date:
+        try:
+            date_filter['$lte'] = datetime.fromisoformat(end_date) + timedelta(days=1)
+        except: pass
+    
+    if date_filter:
+        search_filter['created_at'] = date_filter
+    
+    # Search panics
+    if data_type in ['all', 'panics']:
+        panic_filter = {**search_filter}
+        panics = await db.panics.find(panic_filter).limit(100).to_list(100)
+        for p in panics:
+            p['id'] = str(p['_id'])
+            p['data_type'] = 'panic'
+            del p['_id']
+            results.append(p)
+    
+    # Search reports
+    if data_type in ['all', 'reports']:
+        report_filter = {**search_filter}
+        reports = await db.civil_reports.find(report_filter).limit(100).to_list(100)
+        for r in reports:
+            r['id'] = str(r['_id'])
+            r['data_type'] = 'report'
+            del r['_id']
+            results.append(r)
+    
+    # Search users
+    if data_type in ['all', 'users']:
+        user_filter = {**search_filter}
+        users = await db.users.find(user_filter).limit(100).to_list(100)
+        for u in users:
+            u['id'] = str(u['_id'])
+            u['data_type'] = 'user'
+            del u['_id']
+            if 'password' in u:
+                del u['password']
+            results.append(u)
+    
+    # Sort by date
+    results.sort(key=lambda x: x.get('created_at', datetime.min), reverse=True)
+    
+    return {"results": results[:200], "total": len(results)}
+
+# ===== ADMIN DELETE ENDPOINT =====
+@api_router.delete("/admin/delete/{data_type}/{item_id}")
+async def admin_delete(data_type: str, item_id: str, user: dict = Depends(get_current_user)):
+    """Delete a record - Admin only"""
+    if user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        if data_type == 'panic':
+            result = await db.panics.delete_one({'_id': ObjectId(item_id)})
+        elif data_type == 'report':
+            result = await db.civil_reports.delete_one({'_id': ObjectId(item_id)})
+        elif data_type == 'user':
+            result = await db.users.delete_one({'_id': ObjectId(item_id)})
+        else:
+            raise HTTPException(status_code=400, detail="Invalid data type")
+        
+        if result.deleted_count == 0:
+            raise HTTPException(status_code=404, detail="Record not found")
+        
+        return {"status": "deleted", "id": item_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ===== ADMIN TRACK USER ENDPOINT =====
+@api_router.get("/admin/track-user/{user_id}")
+async def admin_track_user(user_id: str, user: dict = Depends(get_current_user)):
+    """Get user tracking data - Admin only"""
+    if user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    try:
+        target_user = await db.users.find_one({'_id': ObjectId(user_id)})
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+        
+        # Get last known location from panics or security locations
+        last_location = None
+        
+        # Check security team location
+        if target_user.get('role') == 'security':
+            team_loc = await db.security_locations.find_one({'user_id': user_id})
+            if team_loc:
+                last_location = {
+                    'latitude': team_loc.get('latitude'),
+                    'longitude': team_loc.get('longitude'),
+                    'timestamp': team_loc.get('updated_at')
+                }
+        
+        # Check panic locations
+        panic_loc = await db.panic_locations.find_one(
+            {'user_id': user_id},
+            sort=[('timestamp', -1)]
+        )
+        if panic_loc and (not last_location or panic_loc.get('timestamp', datetime.min) > last_location.get('timestamp', datetime.min)):
+            last_location = {
+                'latitude': panic_loc.get('latitude'),
+                'longitude': panic_loc.get('longitude'),
+                'timestamp': panic_loc.get('timestamp')
+            }
+        
+        # Count reports and panics
+        total_reports = await db.civil_reports.count_documents({'user_id': user_id})
+        total_panics = await db.panics.count_documents({'user_id': user_id})
+        
+        # Get recent activity
+        recent_activity = []
+        
+        recent_reports = await db.civil_reports.find({'user_id': user_id}).sort('created_at', -1).limit(5).to_list(5)
+        for r in recent_reports:
+            recent_activity.append({
+                'type': 'report',
+                'description': f"{r.get('type', 'Report').title()} report submitted",
+                'timestamp': r.get('created_at')
+            })
+        
+        recent_panics = await db.panics.find({'user_id': user_id}).sort('created_at', -1).limit(5).to_list(5)
+        for p in recent_panics:
+            recent_activity.append({
+                'type': 'panic',
+                'description': f"{p.get('category', 'Emergency').replace('_', ' ').title()} panic triggered",
+                'timestamp': p.get('created_at')
+            })
+        
+        # Sort by timestamp
+        recent_activity.sort(key=lambda x: x.get('timestamp', datetime.min), reverse=True)
+        
+        # Calculate active days
+        all_dates = set()
+        for r in recent_reports:
+            if r.get('created_at'):
+                all_dates.add(r['created_at'].date())
+        for p in recent_panics:
+            if p.get('created_at'):
+                all_dates.add(p['created_at'].date())
+        
+        return {
+            'user_id': user_id,
+            'last_location': last_location,
+            'total_reports': total_reports,
+            'total_panics': total_panics,
+            'active_days': len(all_dates),
+            'recent_activity': recent_activity[:10]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ===== ADMIN MESSAGING ENDPOINT =====
+@api_router.post("/admin/message")
+async def admin_send_message(
+    data: dict = Body(...),
+    user: dict = Depends(get_current_user)
+):
+    """Send message to user - Admin only"""
+    if user.get('role') != 'admin':
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    to_user_id = data.get('to_user_id')
+    content = data.get('content')
+    
+    if not to_user_id or not content:
+        raise HTTPException(status_code=400, detail="to_user_id and content required")
+    
+    try:
+        admin_id = str(user['_id'])
+        
+        # Find or create conversation
+        conv = await db.conversations.find_one({
+            '$or': [
+                {'participant_1': admin_id, 'participant_2': to_user_id},
+                {'participant_1': to_user_id, 'participant_2': admin_id}
+            ]
+        })
+        
+        if not conv:
+            conv_result = await db.conversations.insert_one({
+                'participant_1': admin_id,
+                'participant_2': to_user_id,
+                'is_admin_chat': True,
+                'created_at': datetime.utcnow(),
+                'last_message_at': datetime.utcnow()
+            })
+            conversation_id = str(conv_result.inserted_id)
+        else:
+            conversation_id = str(conv['_id'])
+        
+        # Create message
+        msg = {
+            'conversation_id': conversation_id,
+            'from_user_id': admin_id,
+            'to_user_id': to_user_id,
+            'content': content,
+            'message_type': 'admin_message',
+            'created_at': datetime.utcnow()
+        }
+        result = await db.messages.insert_one(msg)
+        
+        # Update conversation
+        await db.conversations.update_one(
+            {'_id': ObjectId(conversation_id)},
+            {
+                '$set': {
+                    'last_message': content[:100],
+                    'last_message_at': datetime.utcnow()
+                }
+            }
+        )
+        
+        # Send push notification
+        target_user = await db.users.find_one({'_id': ObjectId(to_user_id)})
+        if target_user and target_user.get('push_token'):
+            await push_service.send_push_notification(
+                [target_user['push_token']],
+                "Message from Admin",
+                content[:100],
+                {'type': 'admin_message', 'conversation_id': conversation_id}
+            )
+        
+        return {
+            'message_id': str(result.inserted_id),
+            'conversation_id': conversation_id,
+            'sent_at': datetime.utcnow().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Include router
 app.include_router(api_router)
 
