@@ -50,9 +50,29 @@ export default function SecurityHome() {
       return;
     }
     
+    // Load agent name from profile
+    await loadAgentProfile();
     await loadTeamLocation();
     await loadNearbyData();
     setLoading(false);
+  };
+
+  const loadAgentProfile = async () => {
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
+      
+      const response = await axios.get(`${BACKEND_URL}/api/user/profile`, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 10000
+      });
+      if (response.data?.full_name) {
+        const firstName = response.data.full_name.split(' ')[0];
+        setAgentName(firstName);
+      }
+    } catch (error) {
+      console.log('[SecurityHome] Could not load profile');
+    }
   };
 
   const loadTeamLocation = async () => {
