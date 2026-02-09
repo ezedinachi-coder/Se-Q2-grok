@@ -22,20 +22,24 @@ export default function SetLocation() {
   });
   const [markerCoords, setMarkerCoords] = useState({ latitude: 9.0820, longitude: 8.6753 });
   const [radiusKm, setRadiusKm] = useState(10);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true); // Start with loading=true
 
   useEffect(() => {
     initializeLocation();
   }, []);
 
   const initializeLocation = async () => {
+    setLoading(true);
     const token = await getAuthToken();
     if (!token) {
       router.replace('/auth/login');
       return;
     }
+    // Load current location first (prioritized)
     await getCurrentLocation();
+    // Then check for saved location (will override if exists)
     await loadSavedLocation();
+    setLoading(false);
   };
 
   const getCurrentLocation = async () => {
