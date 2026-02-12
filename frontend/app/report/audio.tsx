@@ -8,6 +8,8 @@ import * as Location from 'expo-location';
 import axios from 'axios';
 import Constants from 'expo-constants';
 import { getAuthToken, clearAuthData } from '../../utils/auth';
+import { addToQueue } from '../../utils/offlineQueue';
+import NetInfo from '@react-native-community/netinfo';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ongoing-dev-22.preview.emergentagent.com';
 
@@ -99,41 +101,39 @@ export default function AudioReport() {
   const startRecording = async () => {
     try {
       await Audio.setAudioModeAsync({ allowsRecordingIOS: true, playsInSilentModeIOS: true });
+      console.log('Starting recording...');
       const { recording } = await Audio.Recording.createAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       setRecording(recording);
       setIsRecording(true);
       setRecordingDuration(0);
       
-      // Start the timer
+      // Start timer
       timerRef.current = setInterval(() => {
         setRecordingDuration(prev => prev + 1);
       }, 1000);
       
-    } catch (error: any) {
-      console.error('Recording error:', error);
-      Alert.alert('Error', `Failed to start recording: ${error.message}`);
+      console.log('Recording started');
+    } catch (error) {
+      console.error('Failed to start recording:', error);
     }
   };
 
   const stopRecording = async () => {
     if (!recording) return;
-
+    
     try {
-      // Stop the timer
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
-      
-      setIsRecording(false);
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
-      setAudioUri(uri);
+      if (uri) {
+        setAudioUri(uri);
+      }
+      console.log('Recording stopped:', uri);
+    } catch (error) {
+      console.error('Failed to stop recording:', error);
+    } finally {
+      setIsRecording(false);
       setRecording(null);
-      Alert.alert('Success', `Audio recorded successfully (${formatTime(recordingDuration)})`);
-    } catch (error: any) {
-      console.error('Stop recording error:', error);
-      Alert.alert('Error', `Failed to stop recording: ${error.message}`);
+      if (timerRef.current) clearInterval(timerRef.current);
     }
   };
 
@@ -146,12 +146,31 @@ export default function AudioReport() {
     setLoading(true);
     try {
       let currentLocation = location;
-      if (!currentLocation) {
-        try {
-          currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        } catch (err) {
-          currentLocation = { coords: { latitude: 9.0820, longitude: 8.6753 } };
-        }
+      try {
+        currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      } catch {}
+
+      const netInfo = await NetInfo.fetch();
+      const isConnected = netInfo.isConnected && netInfo.isInternetReachable !== false;
+
+      const reportData = {
+        type: 'audio',
+        localUri: audioUri,
+        fileName: `audio_report_${Date.now()}.m4a`,
+        mimeType: 'audio/m4a',
+        caption,
+        isAnonymous,
+        latitude: currentLocation?.coords?.latitude || 9.0820,
+        longitude: currentLocation?.coords?.longitude || 8.6753,
+        durationSeconds: recordingDuration,
+        timestamp: new Date().toISOString(),
+      };
+
+      if (!isConnected) {
+        await addToQueue(reportData);
+        Alert.alert('Offline', 'Audio saved locally. Will upload when online.');
+        router.back();
+        return;
       }
 
       const token = await getAuthToken();
@@ -159,103 +178,96 @@ export default function AudioReport() {
         router.replace('/auth/login');
         return;
       }
-      
+
+      const formData = new FormData();
+      formData.append('file', {
+        uri: audioUri,
+        name: `audio_report_${Date.now()}.m4a`,
+        type: 'audio/m4a',
+      } as any);
+
+      formData.append('type', 'audio');
+      formData.append('caption', caption || 'Audio security report');
+      formData.append('is_anonymous', isAnonymous.toString());
+      formData.append('latitude', currentLocation.coords.latitude.toString());
+      formData.append('longitude', currentLocation.coords.longitude.toString());
+      formData.append('duration_seconds', recordingDuration.toString());
+
       const response = await axios.post(
         `${BACKEND_URL}/api/report/create`,
+        formData,
         {
-          type: 'audio',
-          caption: caption || 'Audio security report',
-          is_anonymous: isAnonymous,
-          file_url: audioUri,
-          uploaded: true,
-          latitude: currentLocation.coords.latitude,
-          longitude: currentLocation.coords.longitude,
-          duration_seconds: recordingDuration
-        },
-        { 
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 15000
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'multipart/form-data',
+          },
+          timeout: 60000,
         }
       );
 
-      console.log('[AudioReport] Report submitted:', response.data);
-
-      Alert.alert('Success!', 'Your audio report has been submitted and is visible to nearby security teams.', [
-        { text: 'OK', onPress: () => router.back() }
-      ]);
+      Alert.alert('Success!', 'Your audio report has been submitted.');
+      router.back();
     } catch (error: any) {
-      console.error('[AudioReport] Submit error:', error?.response?.data);
-      if (error?.response?.status === 401) {
-        Alert.alert('Session Expired', 'Please login again');
-        await clearAuthData();
-        router.replace('/auth/login');
-        return;
-      }
-      let errorMessage = 'Failed to submit report. Please try again.';
-      if (error.response) {
-        errorMessage = error.response.data?.detail || errorMessage;
-      } else if (error.request) {
-        errorMessage = 'Server unreachable. Please check your connection.';
-      }
-      Alert.alert('Error', errorMessage);
+      console.error('Submit error:', error);
+      Alert.alert('Error', error?.response?.data?.detail || 'Failed to submit report');
     } finally {
       setLoading(false);
     }
   };
 
+  const retakeRecording = () => {
+    setAudioUri(null);
+    setRecordingDuration(0);
+    setCaption('');
+    setIsAnonymous(false);
+  };
+
   if (hasPermission === null) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centerContent}>
-          <ActivityIndicator size="large" color="#8B5CF6" />
-          <Text style={styles.permissionText}>Requesting permissions...</Text>
-        </View>
-      </SafeAreaView>
-    );
+    return <View />;
   }
 
   if (hasPermission === false) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.centerContent}>
-          <Ionicons name="mic-off" size={80} color="#64748B" />
-          <Text style={styles.permissionText}>Microphone permission is required</Text>
-          <TouchableOpacity style={styles.button} onPress={requestPermissions}>
-            <Text style={styles.buttonText}>Grant Permission</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.backButtonAlt} onPress={() => router.back()}>
-            <Text style={styles.backButtonTextAlt}>Go Back</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
+      <View style={styles.centerContent}>
+        <Text style={styles.permissionText}>
+          We need microphone permission to record audio reports.
+        </Text>
+        <TouchableOpacity style={styles.button} onPress={requestPermissions}>
+          <Text style={styles.buttonText}>Grant Permissions</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.backButtonAlt} onPress={() => router.back()}>
+          <Text style={styles.backButtonTextAlt}>Go Back</Text>
+        </TouchableOpacity>
+      </View>
     );
   }
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Audio Report</Text>
         <View style={styles.placeholder} />
       </View>
-
+      
       <View style={styles.content}>
         {!audioUri ? (
           <View style={styles.recordingSection}>
             <View style={styles.microphoneContainer}>
-              <Animated.View style={[
-                styles.microphoneCircle, 
-                isRecording && styles.recordingPulse,
-                { transform: [{ scale: isRecording ? pulseAnim : 1 }] }
-              ]}>
+              <Animated.View 
+                style={[
+                  styles.microphoneCircle,
+                  isRecording && styles.recordingPulse,
+                  { transform: [{ scale: pulseAnim }] }
+                ]}
+              >
                 <Ionicons name="mic" size={80} color={isRecording ? '#EF4444' : '#8B5CF6'} />
               </Animated.View>
             </View>
 
-            {/* Recording Timer - Always visible during recording */}
-            {isRecording && (
+            {isRecording ? (
               <View style={styles.timerContainer}>
                 <View style={styles.timerBox}>
                   <View style={styles.recordingDot} />
@@ -263,59 +275,73 @@ export default function AudioReport() {
                 </View>
                 <Text style={styles.recordingLabel}>Recording in progress...</Text>
               </View>
+            ) : (
+              <Text style={styles.instruction}>
+                Press and hold to record your audio report
+              </Text>
             )}
 
-            <Text style={styles.instruction}>
-              {isRecording ? 'Tap to stop recording' : 'Tap the button to start recording'}
-            </Text>
-
-            <TouchableOpacity
+            <TouchableOpacity 
               style={[styles.recordButton, isRecording && styles.stopButton]}
-              onPress={isRecording ? stopRecording : startRecording}
+              onPressIn={startRecording}
+              onPressOut={stopRecording}
             >
               <Ionicons name={isRecording ? 'stop' : 'mic'} size={24} color="#fff" />
-              <Text style={styles.recordButtonText}>{isRecording ? 'Stop Recording' : 'Start Recording'}</Text>
+              <Text style={styles.recordButtonText}>
+                {isRecording ? 'Stop Recording' : 'Hold to Record'}
+              </Text>
             </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.formContainer}>
             <View style={styles.successBox}>
-              <Ionicons name="checkmark-circle" size={60} color="#8B5CF6" />
+              <Ionicons name="checkmark-circle" size={80} color="#8B5CF6" />
               <Text style={styles.successText}>Audio Recorded</Text>
-              <Text style={styles.durationText}>Duration: {formatTime(recordingDuration)}</Text>
+              <Text style={styles.durationText}>{formatTime(recordingDuration)} seconds</Text>
             </View>
 
             <View style={styles.inputContainer}>
-              <Text style={styles.label}>Caption/Description</Text>
+              <Text style={styles.label}>Caption (optional)</Text>
               <TextInput
                 style={styles.textArea}
-                placeholder="Describe your report..."
+                placeholder="Describe the incident..."
                 placeholderTextColor="#64748B"
+                multiline
                 value={caption}
                 onChangeText={setCaption}
-                multiline
-                numberOfLines={4}
               />
             </View>
 
             <View style={styles.switchContainer}>
               <View>
-                <Text style={styles.switchLabel}>Submit Anonymously</Text>
-                <Text style={styles.switchDescription}>Your identity will not be revealed</Text>
+                <Text style={styles.switchLabel}>Anonymous Report</Text>
+                <Text style={styles.switchDescription}>Hide your identity from responders</Text>
               </View>
               <Switch
                 value={isAnonymous}
                 onValueChange={setIsAnonymous}
-                trackColor={{ false: '#334155', true: '#8B5CF6' }}
+                trackColor={{ false: '#334155', true: '#10B981' }}
                 thumbColor={isAnonymous ? '#fff' : '#f4f3f4'}
               />
             </View>
 
-            <TouchableOpacity style={styles.submitButton} onPress={submitReport} disabled={loading}>
-              {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitButtonText}>Submit Report</Text>}
+            <TouchableOpacity 
+              style={styles.submitButton}
+              onPress={submitReport}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.submitButtonText}>Submit Report</Text>
+              )}
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.retakeButton} onPress={() => { setAudioUri(null); setCaption(''); setRecordingDuration(0); }}>
+            <TouchableOpacity 
+              style={styles.retakeButton}
+              onPress={retakeRecording}
+              disabled={loading}
+            >
               <Text style={styles.retakeButtonText}>Record Again</Text>
             </TouchableOpacity>
           </View>
@@ -342,8 +368,6 @@ const styles = StyleSheet.create({
   microphoneContainer: { marginBottom: 32 },
   microphoneCircle: { width: 180, height: 180, borderRadius: 90, backgroundColor: '#1E293B', justifyContent: 'center', alignItems: 'center', borderWidth: 4, borderColor: '#8B5CF6' },
   recordingPulse: { borderColor: '#EF4444', backgroundColor: '#EF444420' },
-  
-  // Timer styles
   timerContainer: { alignItems: 'center', marginBottom: 24 },
   timerBox: { 
     flexDirection: 'row', 
@@ -371,7 +395,6 @@ const styles = StyleSheet.create({
     marginRight: 16 
   },
   recordingLabel: { fontSize: 14, color: '#94A3B8' },
-  
   instruction: { fontSize: 16, color: '#94A3B8', textAlign: 'center', marginBottom: 32 },
   recordButton: { flexDirection: 'row', backgroundColor: '#8B5CF6', paddingHorizontal: 32, paddingVertical: 18, borderRadius: 12, alignItems: 'center', gap: 12 },
   stopButton: { backgroundColor: '#EF4444' },
