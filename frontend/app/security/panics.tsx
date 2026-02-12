@@ -59,13 +59,19 @@ export default function SecurityPanics() {
       if (error?.response?.status === 401) {
         await clearAuthData();
         router.replace('/auth/login');
+      } else {
+        Alert.alert('Error', 'Failed to load panics. Please try again.');
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const openInMaps = (latitude: number, longitude: number, label: string) => {
+  const openInMaps = (latitude: number | undefined, longitude: number | undefined, label: string) => {
+    if (latitude == null || longitude == null) {
+      Alert.alert('Error', 'Location not available');
+      return;
+    }
     const scheme = Platform.select({ ios: 'maps:', android: 'geo:' });
     const url = Platform.select({
       ios: `maps:?q=${encodeURIComponent(label)}&ll=${latitude},${longitude}`,
@@ -76,7 +82,7 @@ export default function SecurityPanics() {
     }
   };
 
-  const callUser = (phone: string) => {
+  const callUser = (phone: string | undefined) => {
     if (phone) {
       Linking.openURL(`tel:${phone}`);
     } else {
@@ -84,7 +90,8 @@ export default function SecurityPanics() {
     }
   };
 
-  const formatDateTime = (dateString: string) => {
+  const formatDateTime = (dateString: string | undefined) => {
+    if (!dateString) return { date: 'Unknown', time: '' };
     const date = new Date(dateString);
     return {
       date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
@@ -92,8 +99,8 @@ export default function SecurityPanics() {
     };
   };
 
-  const getCategoryInfo = (category: string) => {
-    return EMERGENCY_CATEGORIES[category] || EMERGENCY_CATEGORIES.other;
+  const getCategoryInfo = (category: string | undefined) => {
+    return EMERGENCY_CATEGORIES[category || 'other'];
   };
 
   const renderPanic = ({ item }: any) => {
@@ -139,7 +146,7 @@ export default function SecurityPanics() {
           <View style={styles.detailRow}>
             <Ionicons name="location" size={16} color="#94A3B8" />
             <Text style={styles.detailText}>
-              {item.latitude?.toFixed(4)}, {item.longitude?.toFixed(4)}
+              {item.latitude?.toFixed(4) ?? 'N/A'}, {item.longitude?.toFixed(4) ?? 'N/A'}
             </Text>
           </View>
           <View style={styles.detailRow}>
@@ -151,22 +158,10 @@ export default function SecurityPanics() {
         </View>
 
         <View style={styles.panicActions}>
-          <TouchableOpacity 
-            style={[styles.actionButton, styles.mapButton]}
-            onPress={() => setLocationModal({
-              visible: true,
-              lat: item.latitude,
-              lng: item.longitude,
-              title: `${senderName}'s Location`,
-              subtitle: categoryInfo.label
-            })}
-          >
-            <Ionicons name="location" size={20} color="#fff" />
-            <Text style={styles.actionButtonText}>Location</Text>
-          </TouchableOpacity>
+          {/* Removed Location button entirely */}
           
           <TouchableOpacity 
-            style={[styles.actionButton, styles.respondBtn]}
+            style={[styles.actionButton, styles.respondBtn, { flex: 1 }]}
             onPress={() => Alert.alert('Respond', 'Response feature coming soon. You can call the user or navigate to their location.')}
           >
             <Ionicons name="checkmark-circle" size={20} color="#fff" />
@@ -255,7 +250,7 @@ const styles = StyleSheet.create({
   detailRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   detailText: { fontSize: 14, color: '#94A3B8' },
   panicActions: { flexDirection: 'row', marginTop: 16, gap: 12 },
-  actionButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 10 },
+  actionButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 10 },
   mapButton: { backgroundColor: '#3B82F6' },
   respondBtn: { backgroundColor: '#F59E0B' },
   callButton: { backgroundColor: '#10B981' },
