@@ -31,7 +31,6 @@ export default function SecurityReports() {
     useCallback(() => {
       loadReports();
       return () => {
-        // Cleanup audio on unmount
         if (currentSound) {
           currentSound.unloadAsync();
         }
@@ -63,7 +62,6 @@ export default function SecurityReports() {
         return;
       }
       
-      // Add cache-busting timestamp
       const response = await axios.get(`${BACKEND_URL}/api/security/nearby-reports?t=${Date.now()}`, {
         headers: { Authorization: `Bearer ${token}`, 'Cache-Control': 'no-cache' },
         timeout: 15000
@@ -75,6 +73,8 @@ export default function SecurityReports() {
       if (error?.response?.status === 401) {
         await clearAuthData();
         router.replace('/auth/login');
+      } else {
+        Alert.alert('Error', 'Failed to load reports. Please try again.');
       }
     } finally {
       setLoading(false);
@@ -87,16 +87,17 @@ export default function SecurityReports() {
     loadReports();
   };
 
-  const playAudio = async (audioUrl: string, reportId: string) => {
+  const playAudio = async (audioUrl: string | undefined, reportId: string) => {
+    if (!audioUrl) {
+      Alert.alert('Error', 'Audio URL not available');
+      return;
+    }
     try {
-      // If same audio is playing, toggle pause/play
       if (playingId === reportId && currentSound) {
         if (isPaused) {
-          // Resume from position
           await currentSound.playFromPositionAsync(playbackPosition);
           setIsPaused(false);
         } else {
-          // Pause and save position
           const status = await currentSound.getStatusAsync();
           if (status.isLoaded) {
             setPlaybackPosition(status.positionMillis);
@@ -107,7 +108,6 @@ export default function SecurityReports() {
         return;
       }
 
-      // Stop current audio if different
       if (currentSound) {
         await currentSound.stopAsync();
         await currentSound.unloadAsync();
@@ -117,7 +117,6 @@ export default function SecurityReports() {
         setPlaybackPosition(0);
       }
 
-      // Configure audio mode
       await Audio.setAudioModeAsync({
         playsInSilentModeIOS: true,
         staysActiveInBackground: false,
@@ -125,7 +124,6 @@ export default function SecurityReports() {
 
       console.log('[SecurityReports] Loading audio from:', audioUrl);
 
-      // Load and play new audio
       const { sound: newSound } = await Audio.Sound.createAsync(
         { uri: audioUrl },
         { shouldPlay: true }
@@ -136,7 +134,6 @@ export default function SecurityReports() {
       setIsPaused(false);
       setPlaybackPosition(0);
 
-      // Handle playback finished
       newSound.setOnPlaybackStatusUpdate((status: any) => {
         if (status.isLoaded && status.didJustFinish) {
           setPlayingId(null);
@@ -144,6 +141,10 @@ export default function SecurityReports() {
           setPlaybackPosition(0);
           newSound.unloadAsync();
           setCurrentSound(null);
+        } else if (status.error) {
+          console.error('[SecurityReports] Playback error:', status.error);
+          Alert.alert('Playback Error', 'Unable to play audio: ' + status.error);
+          stopAudio();
         }
       });
     } catch (error: any) {
@@ -163,11 +164,19 @@ export default function SecurityReports() {
     }
   };
 
-  const playVideo = (videoUrl: string) => {
+  const playVideo = (videoUrl: string | undefined) => {
+    if (!videoUrl) {
+      Alert.alert('Error', 'Video URL not available');
+      return;
+    }
     setSelectedVideoUrl(videoUrl);
   };
 
-  const openInMaps = (latitude: number, longitude: number) => {
+  const openInMaps = (latitude: number | undefined, longitude: number | undefined) => {
+    if (latitude == null || longitude == null) {
+      Alert.alert('Error', 'Location not available');
+      return;
+    }
     const scheme = Platform.select({ ios: 'maps:', android: 'geo:' });
     const url = Platform.select({
       ios: `maps:?q=Report&ll=${latitude},${longitude}`,
@@ -186,86 +195,83 @@ export default function SecurityReports() {
           label: '(Anonymous - for discreet attendance)'
         };
       } else {
-        return { name: 'Anonymous', label: '' };
+        return {
+          name: 'Anonymous Reporter',
+          label: '(Discreet attendance required)'
+        };
       }
     }
-    return { name: item.sender_email || item.user_email || 'Unknown User', label: '' };
+    return {
+      name: item.sender_email || item.user_email || 'Unknown',
+      label: ''
+    };
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDateTime = (dateString: string | undefined) => {
+    if (!dateString) return 'Unknown date';
     const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
   const renderReport = ({ item }: any) => {
     const sender = getSenderDisplay(item);
-    const isPlaying = playingId === item._id || playingId === item.id;
-    const reportId = item._id || item.id;
-    
+    const dateTime = formatDateTime(item.created_at);
+
     return (
       <View style={styles.reportCard}>
         <View style={styles.reportHeader}>
-          <View style={styles.reportIcon}>
-            <Ionicons
-              name={item.type === 'video' ? 'videocam' : 'mic'}
-              size={28}
-              color={item.type === 'video' ? '#10B981' : '#8B5CF6'}
+          <View style={[styles.reportIcon, { backgroundColor: item.type === 'video' ? '#10B98120' : '#8B5CF620' }]}>
+            <Ionicons 
+              name={item.type === 'video' ? 'videocam' : 'mic'} 
+              size={24} 
+              color={item.type === 'video' ? '#10B981' : '#8B5CF6'} 
             />
           </View>
           <View style={styles.reportInfo}>
-            <Text style={styles.reportType}>{item.type?.toUpperCase()} REPORT</Text>
+            <Text style={styles.reportType}>{item.type.toUpperCase()} Report</Text>
             <Text style={styles.reportSender}>{sender.name}</Text>
-            {sender.label ? (
-              <Text style={styles.anonymousLabel}>{sender.label}</Text>
-            ) : null}
-            <Text style={styles.reportDate}>{formatDate(item.created_at)}</Text>
+            <Text style={styles.anonymousLabel}>{sender.label}</Text>
+            <Text style={styles.reportDate}>{dateTime}</Text>
+          </View>
+          <View style={[styles.statusBadge, styles.uploadedBadge]}>
+            <Text style={[styles.statusText, styles.uploadedText]}>Uploaded</Text>
           </View>
         </View>
 
         {item.caption && (
-          <Text style={styles.caption}>{item.caption}</Text>
+          <Text style={styles.caption}>"{item.caption}"</Text>
         )}
 
         <View style={styles.reportActions}>
-          {item.type === 'audio' && item.file_url && (
+          {item.type === 'audio' && (
             <TouchableOpacity
-              style={[styles.actionButton, isPlaying && !isPaused && styles.actionButtonActive]}
-              onPress={() => playAudio(item.file_url, reportId)}
+              style={[styles.actionButton, playingId === item._id && !isPaused ? styles.actionButtonActive : null]}
+              onPress={() => playAudio(item.file_url, item._id)}
             >
-              <Ionicons
-                name={isPlaying ? (isPaused ? 'play' : 'pause') : 'play'}
-                size={20}
-                color={isPlaying && !isPaused ? '#fff' : '#8B5CF6'}
-              />
-              <Text style={[styles.actionText, isPlaying && !isPaused && styles.actionTextActive]}>
-                {isPlaying ? (isPaused ? 'Resume' : 'Pause') : 'Play'}
+              <Ionicons name={playingId === item._id && !isPaused ? 'pause' : 'play'} size={20} color={playingId === item._id && !isPaused ? '#fff' : '#94A3B8'} />
+              <Text style={[styles.actionText, playingId === item._id && !isPaused ? styles.actionTextActive : null]}>
+                {playingId === item._id && !isPaused ? 'Pause' : 'Play'}
               </Text>
             </TouchableOpacity>
           )}
 
-          {item.type === 'audio' && isPlaying && (
+          {playingId === item._id && (
             <TouchableOpacity
-              style={styles.actionButton}
+              style={[styles.actionButton, styles.stopButton]}
               onPress={stopAudio}
             >
               <Ionicons name="stop" size={20} color="#EF4444" />
-              <Text style={styles.actionText}>Stop</Text>
+              <Text style={[styles.actionText, { color: '#EF4444' }]}>Stop</Text>
             </TouchableOpacity>
           )}
 
-          {item.type === 'video' && item.file_url && (
+  {item.type === 'video' && (
             <TouchableOpacity
               style={styles.actionButton}
               onPress={() => playVideo(item.file_url)}
             >
               <Ionicons name="play-circle" size={20} color="#10B981" />
-              <Text style={styles.actionText}>Watch</Text>
+              <Text style={[styles.actionText, { color: '#10B981' }]}>Watch</Text>
             </TouchableOpacity>
           )}
 
@@ -309,7 +315,7 @@ export default function SecurityReports() {
             <Ionicons name="close" size={28} color="#fff" />
           </TouchableOpacity>
           <Text style={styles.videoTitle}>Video Report</Text>
-          <View style={{ width: 28 }} />
+          <View style={{ width: 28 } } />
         </View>
         <View style={styles.videoContainer}>
           <Video
@@ -319,6 +325,11 @@ export default function SecurityReports() {
             resizeMode={ResizeMode.CONTAIN}
             shouldPlay
             isLooping={false}
+            onError={(error) => {
+              console.error('[Video Error]', error);
+              Alert.alert('Video Error', 'Unable to load video.');
+              setSelectedVideoUrl(null);
+            }}
           />
         </View>
       </SafeAreaView>
@@ -382,7 +393,7 @@ const styles = StyleSheet.create({
   listContent: { padding: 16 },
   reportCard: { backgroundColor: '#1E293B', borderRadius: 16, padding: 16, marginBottom: 12 },
   reportHeader: { flexDirection: 'row', alignItems: 'flex-start' },
-  reportIcon: { width: 50, height: 50, borderRadius: 12, backgroundColor: '#0F172A', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  reportIcon: { width: 50, height: 50, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   reportInfo: { flex: 1 },
   reportType: { fontSize: 14, fontWeight: '700', color: '#fff', marginBottom: 4 },
   reportSender: { fontSize: 14, color: '#94A3B8', marginBottom: 2 },
