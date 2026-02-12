@@ -14,7 +14,6 @@ import { getAuthToken, clearAuthData } from '../../utils/auth';
 const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ongoing-dev-22.preview.emergentagent.com';
 const LOCATION_TASK = 'background-location-panic';
 
-// Background task - uses AsyncStorage directly (can't use SecureStore in background)
 TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   if (error) {
     console.error('[PanicActive] Background location error:', error);
@@ -42,7 +41,6 @@ TaskManager.defineTask(LOCATION_TASK, async ({ data, error }) => {
   }
 });
 
-// Emergency contacts for routing
 const EMERGENCY_SERVICES = {
   ambulance: [
     { name: 'National Emergency', number: '112' },
@@ -54,7 +52,6 @@ const EMERGENCY_SERVICES = {
   ]
 };
 
-// Security emergencies that notify agencies
 const SECURITY_EMERGENCIES = ['violence', 'robbery', 'kidnapping', 'breakin', 'harassment', 'other'];
 
 export default function PanicActive() {
@@ -105,18 +102,108 @@ export default function PanicActive() {
     }
   };
 
+  const startLocationTracking = async (token: string) => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+
+    intervalRef.current = setInterval(async () => {
+      try {
+        const location = await Location.getCurrentPositionAsync({ 
+          accuracy: Location.Accuracy.High,
+          timeout: 10000,
+          maximumAge: 0
+        }).catch(err => {
+          console.warn('[Panic] Location fetch failed:', err);
+          return null;
+        });
+
+        if (!location) return;
+
+        await axios.post(`${BACKEND_URL}/api/panic/location`, {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          accuracy: location.coords.accuracy,
+          timestamp: new Date().toISOString()
+        }, { 
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 8000 
+        });
+      } catch (error) {
+        console.error('[Panic] Tracking cycle error:', error);
+      }
+    }, 30000);
+  };
+
   const handleCategorySelect = async (category: string) => {
     setSelectedCategory(category);
     setShowCategoryModal(false);
 
-    // Route based on emergency type
-    if (category === 'medical') {
-      setShowEmergencyContacts('ambulance');
-    } else if (category === 'fire') {
-      setShowEmergencyContacts('fire');
-    } else if (SECURITY_EMERGENCIES.includes(category)) {
-      // Security emergency - activate panic and notify agencies
-      await activatePanicMode(category);
+    try {
+      let panicLocation = { latitude: 9.0820, longitude: 8.6753 }; // fallback
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.High,
+            timeout: 8000,
+          });
+          panicLocation = {
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+          };
+        }
+      } catch (err) {
+        console.warn('[Panic] Initial location fetch failed:', err);
+      }
+
+      const token = await getAuthToken();
+      if (!token) {
+        Alert.alert('Error', 'Authentication required');
+        router.replace('/auth/login');
+        return;
+      }
+
+      const response = await axios.post(
+        `${BACKEND_URL}/api/panic/create`,
+        {
+          category,
+          latitude: panicLocation.latitude,
+          longitude: panicLocation.longitude,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          timeout: 15000,
+        }
+      );
+
+      const panicId = response.data?.id || response.data?.panic_id;
+      if (!panicId) throw new Error('No panic ID returned');
+
+      const panicData = {
+        id: panicId,
+        category,
+        started_at: new Date().toISOString(),
+      };
+      await AsyncStorage.setItem('active_panic', JSON.stringify(panicData));
+
+      setPanicId(panicId);
+      setIsTracking(true);
+      setShowSafeButton(true);
+
+      startLocationTracking(token);
+
+      if (category === 'medical') {
+        setShowEmergencyContacts('ambulance');
+      } else if (category === 'fire') {
+        setShowEmergencyContacts('fire');
+      } else if (SECURITY_EMERGENCIES.includes(category)) {
+        Alert.alert('Security Notified', 'Nearby security personnel have been alerted.');
+      }
+
+    } catch (error: any) {
+      console.error('[Panic] Activation failed:', error);
+      Alert.alert('Panic Activation Failed', error?.response?.data?.detail || error.message);
+      setShowCategoryModal(true); // reopen modal on failure
     }
   };
 
@@ -125,222 +212,100 @@ export default function PanicActive() {
     router.back();
   };
 
-  const activatePanicMode = async (category: string) => {
-    try {
-      const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-      if (foregroundStatus !== 'granted') {
-        Alert.alert('Permission Denied', 'Location permission required');
-        router.back();
-        return;
-      }
-
-      await Location.requestBackgroundPermissionsAsync();
-
-      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      const token = await getAuthToken();
-      
-      if (!token) {
-        Alert.alert('Session Expired', 'Please login again');
-        router.replace('/auth/login');
-        return;
-      }
-      
-      const response = await axios.post(`${BACKEND_URL}/api/panic/activate`, {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        accuracy: location.coords.accuracy,
-        timestamp: new Date().toISOString(),
-        emergency_category: category
-      }, { 
-        headers: { Authorization: `Bearer ${token}` },
-        timeout: 15000 
-      });
-
-      const newPanicId = response.data.panic_id;
-      setPanicId(newPanicId);
-      setIsTracking(true);
-
-      // Save to storage for persistence
-      await AsyncStorage.setItem('active_panic', JSON.stringify({
-        id: newPanicId,
-        category: category,
-        activated_at: new Date().toISOString()
-      }));
-
-      // Copy token to AsyncStorage for background task
-      await AsyncStorage.setItem('auth_token', token);
-
-      startLocationTracking(token);
-
-      Alert.alert(
-        'Panic Mode Activated',
-        'Nearby security agencies have been alerted. Your phone will go to sleep for discreet tracking.',
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              // Exit app for discreet tracking
-              BackHandler.exitApp();
-            }
-          }
-        ]
-      );
-    } catch (error: any) {
-      console.error('[PanicActive] Activation error:', error?.response?.data);
-      if (error?.response?.status === 401) {
-        Alert.alert('Session Expired', 'Please login again');
-        await clearAuthData();
-        router.replace('/auth/login');
-      } else {
-        Alert.alert('Error', 'Failed to activate panic mode');
-        router.back();
-      }
-    }
-  };
-
-  const startLocationTracking = async (token: string) => {
-    // Foreground interval tracking
-    if (intervalRef.current) clearInterval(intervalRef.current);
-    
-    intervalRef.current = setInterval(async () => {
-      try {
-        const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        await axios.post(`${BACKEND_URL}/api/panic/location`, {
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          accuracy: location.coords.accuracy,
-          timestamp: new Date().toISOString()
-        }, { 
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 10000 
-        });
-        console.log('[PanicActive] Location sent');
-      } catch (error) {
-        console.error('[PanicActive] Location tracking error:', error);
-      }
-    }, 30000);
-
-    // Try to start background tracking
-    try {
-      await Location.startLocationUpdatesAsync(LOCATION_TASK, {
-        accuracy: Location.Accuracy.High,
-        timeInterval: 30000,
-        distanceInterval: 0,
-        foregroundService: {
-          notificationTitle: 'SafeGuard Active',
-          notificationBody: 'Location tracking in progress',
-        },
-      });
-    } catch (bgError) {
-      console.log('[PanicActive] Background tracking not available:', bgError);
-    }
-  };
-
   const markSafe = async () => {
-    Alert.alert(
-      "I'm Safe Now",
-      'This will stop tracking and notify security that you are safe.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: "Yes, I'm Safe",
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const token = await getAuthToken();
-              if (intervalRef.current) clearInterval(intervalRef.current);
-              
-              // Stop background tracking
-              try {
-                await Location.stopLocationUpdatesAsync(LOCATION_TASK);
-              } catch (stopError) {
-                console.log('[PanicActive] Background stop error:', stopError);
-              }
+    try {
+      const token = await getAuthToken();
+      if (!token) return;
 
-              // Deactivate in backend
-              if (token) {
-                await axios.post(`${BACKEND_URL}/api/panic/deactivate`, {}, { 
-                  headers: { Authorization: `Bearer ${token}` },
-                  timeout: 15000 
-                });
-              }
+      await axios.post(`${BACKEND_URL}/api/panic/deactivate`, {
+        panic_id: panicId
+      }, {
+        headers: { Authorization: `Bearer ${token}` },
+        timeout: 15000
+      });
 
-              // Clear local storage
-              await AsyncStorage.removeItem('active_panic');
+      await AsyncStorage.removeItem('active_panic');
+      if (intervalRef.current) clearInterval(intervalRef.current);
 
-              setIsTracking(false);
-              setShowSafeButton(false);
-              
-              Alert.alert('You are Safe', 'Panic mode deactivated. Stay safe!', [
-                { text: 'OK', onPress: () => router.replace('/civil/home') }
-              ]);
-            } catch (error) {
-              Alert.alert('Error', 'Failed to deactivate panic mode');
-              console.error('[PanicActive] Deactivation error:', error);
-            }
-          }
-        }
-      ]
-    );
+      setIsTracking(false);
+      setPanicId(null);
+      setSelectedCategory(null);
+      setShowSafeButton(false);
+
+      Alert.alert('Deactivated', 'Panic mode deactivated successfully');
+      router.back();
+    } catch (error: any) {
+      console.error('[Panic] Deactivation failed:', error);
+      Alert.alert('Error', 'Failed to deactivate panic');
+    }
   };
 
-  const callEmergency = (number: string) => {
+  const callContact = (number: string) => {
     Linking.openURL(`tel:${number}`);
   };
 
-  // Show emergency contacts for medical/fire
-  if (showEmergencyContacts) {
-    const services = EMERGENCY_SERVICES[showEmergencyContacts];
-    const title = showEmergencyContacts === 'ambulance' ? 'Ambulance Services' : 'Fire Services';
-    const icon = showEmergencyContacts === 'ambulance' ? 'medkit' : 'flame';
-    const color = showEmergencyContacts === 'ambulance' ? '#10B981' : '#F59E0B';
+  const handleBackPress = () => {
+    Alert.alert(
+      'Exit App',
+      'Are you sure you want to exit while panic is active?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Exit', style: 'destructive', onPress: () => BackHandler.exitApp() },
+      ]
+    );
+    return true;
+  };
 
+  useEffect(() => {
+    if (isTracking) {
+      BackHandler.addEventListener('hardwareBackPress', handleBackPress);
+      return () => BackHandler.removeEventListener('hardwareBackPress', handleBackPress);
+    }
+  }, [isTracking]);
+
+  if (showEmergencyContacts) {
+    const contacts = EMERGENCY_SERVICES[showEmergencyContacts];
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => { setShowEmergencyContacts(null); setShowCategoryModal(true); }}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>{title}</Text>
-          <View style={{ width: 24 }} />
-        </View>
-
         <View style={styles.emergencyContent}>
-          <View style={[styles.emergencyIcon, { backgroundColor: `${color}20` }]}>
-            <Ionicons name={icon as any} size={60} color={color} />
+          <View style={[styles.emergencyIcon, { backgroundColor: showEmergencyContacts === 'ambulance' ? '#10B98120' : '#F59E0B20' }]}>
+            <Ionicons 
+              name={showEmergencyContacts === 'ambulance' ? 'medkit' : 'flame'} 
+              size={64} 
+              color={showEmergencyContacts === 'ambulance' ? '#10B981' : '#F59E0B'} 
+            />
           </View>
-          <Text style={styles.emergencyTitle}>{title}</Text>
+          <Text style={styles.emergencyTitle}>
+            {showEmergencyContacts === 'ambulance' ? 'Medical' : 'Fire'} Emergency Contacts
+          </Text>
           <Text style={styles.emergencyDescription}>
-            Tap to call emergency services immediately
+            Call immediately for help. Your location is being tracked.
           </Text>
 
-          {services.map((service, index) => (
-            <TouchableOpacity
+          {contacts.map((contact, index) => (
+            <TouchableOpacity 
               key={index}
-              style={[styles.callButton, { backgroundColor: color }]}
-              onPress={() => callEmergency(service.number)}
+              style={styles.callButton}
+              onPress={() => callContact(contact.number)}
             >
-              <Ionicons name="call" size={24} color="#fff" />
+              <Ionicons name="call" size={28} color="#10B981" />
               <View style={styles.callInfo}>
-                <Text style={styles.callName}>{service.name}</Text>
-                <Text style={styles.callNumber}>{service.number}</Text>
+                <Text style={styles.callName}>{contact.name}</Text>
+                <Text style={styles.callNumber}>{contact.number}</Text>
               </View>
+              <Ionicons name="chevron-forward" size={24} color="#64748B" />
             </TouchableOpacity>
           ))}
 
-          <TouchableOpacity
-            style={styles.backHomeButton}
-            onPress={() => router.replace('/civil/home')}
-          >
-            <Text style={styles.backHomeText}>Back to Home</Text>
+          <TouchableOpacity style={styles.backHomeButton} onPress={() => setShowEmergencyContacts(null)}>
+            <Text style={styles.backHomeText}>Back to Panic Screen</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  // Show "I'm Safe Now" button if panic was previously activated
-  if (showSafeButton && isTracking) {
+  if (isTracking) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.trackingContent}>
