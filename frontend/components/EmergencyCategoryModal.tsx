@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Modal, ScrollView } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector_icons';
 
 interface EmergencyCategoryModalProps {
   visible: boolean;
@@ -24,10 +24,7 @@ export default function EmergencyCategoryModal({ visible, onSelect, onCancel }: 
 
   const handleSelect = (categoryId: string) => {
     setSelectedCategory(categoryId);
-    setTimeout(() => {
-      onSelect(categoryId);
-      setSelectedCategory(null);
-    }, 200);
+    onSelect(categoryId); // Immediate – no delay for direct activation
   };
 
   return (
@@ -54,7 +51,7 @@ export default function EmergencyCategoryModal({ visible, onSelect, onCancel }: 
                   selectedCategory === category.id && styles.categoryButtonSelected
                 ]}
                 onPress={() => handleSelect(category.id)}
-                activeOpacity={0.7}
+                activeOpacity= {0.7}
               >
                 <View style={[styles.iconContainer, { backgroundColor: category.color + '20' }]}>
                   <Ionicons name={category.icon as any} size={24} color={category.color} />
