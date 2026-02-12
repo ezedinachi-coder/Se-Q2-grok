@@ -8,7 +8,7 @@ import axios from 'axios';
 import Constants from 'expo-constants';
 import { Audio } from 'expo-av';
 import { Video, ResizeMode } from 'expo-av';
-import { getAuthToken, clearAuthData, getUserMetadata } from '../../utils/auth';
+import { getAuthToken, clearAuthData, getUserMetadata } from '../utils/auth';
 import { LocationMapModal } from '../../components/LocationMapModal';
 
 const BACKEND_URL = Constants.expoConfig?.extra?.backendUrl || process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ongoing-dev-22.preview.emergentagent.com';
