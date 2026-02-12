@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import NetInfo from '@react-native-community/netinfo';
 import axios from 'axios';
+import * as FileSystem from 'expo-file-system';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
 const QUEUE_KEY = 'safeguard_offline_queue';
