@@ -7,7 +7,7 @@ import { Audio } from 'expo-av';
 import * as Location from 'expo-location';
 import axios from 'axios';
 import Constants from 'expo-constants';
-import { getAuthToken, clearAuthData } from '../utils/auth';
+import { getAuthToken, clearAuthData } from '../../utils/auth';
 import { addToQueue } from '../../utils/offlineQueue';
 import NetInfo from '@react-native-community/netinfo';
 
